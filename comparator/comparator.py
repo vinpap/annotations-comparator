@@ -66,6 +66,8 @@ class Comparator:
             test_annots,
             geoptis
             )
+        
+        return metrics
 
 
 
@@ -127,6 +129,7 @@ class Comparator:
         # Si format videocoder, appeler convert_from_videocoder
         # Si format AI, appeler convert_from_AI
 
+
         annot_ref_format = utils.check_annot_format(annot_ref)
         if annot_ref_format == "AI":
             annot_ref = utils.convert_from_ai(annot_ref, geoptis)
@@ -139,9 +142,12 @@ class Comparator:
         else:
             annot_test = utils.convert_from_video(annot_test, geoptis)
         
+        # number of detection to keep for average recall calculation =
+        # number of frames in interval given by +-
+        # the largest distance threshold considered (detections beyand are necessarily FN)
+        N_ai = 2 * (1 + threshold_dist // process_every_nth_meter)
 
 
-        # MAINTENANT, ON UTILISE LE CODE DE THÉO POUR CALCULER LES MÉTRIQUES
         metrics = {}
         for anomaly_class in classes_comp:
             print(f"PROCESSING CLASS {anomaly_class}...")
@@ -150,13 +156,22 @@ class Comparator:
             length_ref = np.array(annot_ref[class_index])
             length_test = np.array(annot_test[class_index])
 
-            distances_full = [] # for AP, dim N_detection_AI
-            distances_full += utils.compute_smallest_distances(length_ref, length_test).tolist()
-            print(distances_full)
-            """if len(lv) > 0 and len(lai) > 0:
-                distances_array, score_array = utils.compute_distances(lv, lai, score, N_ai) # for average recall
-                distances_array_full.append(distances_array)
-                score_array_full.append(score_array)"""
+            # ATTENTION ICI, BIEN VÉRIFIER QUE J'AI FAIT LES CALCULS DANS LE BON SENS
+            # PLUS PROBLÈME AVEC LA CLASSE PONTAGE, REGARDER LES RÉSULTATS
+            distances1 = utils.compute_smallest_distances(length_ref, length_test)
+            distances2 = utils.compute_smallest_distances(length_test, length_ref)
+            precision, recall = utils.compute_precision_recall(distances2, distances1, threshold_dist)
+
+            if anomaly_class == "Pontage":
+                print(distances1)
+                print(distances2)
+            class_metrics = {}
+            class_metrics["precision"] = precision
+            class_metrics["recall"] = recall
+            metrics[anomaly_class] = class_metrics
+        
+        return metrics
+
 
 
 

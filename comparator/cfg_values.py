@@ -1,4 +1,4 @@
-threshold_dist = 6 # Distance threshold between reference and test
+threshold_dist = 10 # Distance threshold between reference and test
 # annotations below which the test annotation is considered a True Positive
 # THIS MIGHT NOT BE OPTIMAL, SHOULD IT BE CHANGED?
 

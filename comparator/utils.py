@@ -60,6 +60,17 @@ def strip_accents(s):
         c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn"
     )
 
+def compute_precision_recall(distances_compared, distances_ref, threshold):
+    tp_compared = (distances_compared < threshold).sum()
+    fp = (distances_compared > threshold).sum()
+    
+    tp_ref = (distances_ref < threshold).sum()
+    fn = (distances_ref > threshold).sum()
+    
+    recall = tp_ref / (tp_ref + fn)
+    precision = tp_compared / (tp_compared + fp)
+
+    return precision, recall
 
 
 def Haversine_distance(lnglats1, lnglats2):
@@ -95,14 +106,12 @@ def compute_smallest_distances(length_1, length_2):
         distances.append(smallest_dist)
     return np.array(distances)
 
-def compute_distances(length_vid, length_AI, AI_score, N_ai):
+def compute_distances(length_vid, length_AI, N_ai):
     # compute distances for each element of length_vid wrt length_AI (arrays or lists)
     # For each degradation in length_vid measure and return the N_ai smallest distances wrt to AI detections
     # returns array of distances (N_degradation_vid, N_ai), and array of AI scores (same dimensions)
-    assert len(length_AI) == len(AI_score)
     
     distance_list = []
-    score_list = []
     for l1 in length_vid:
         if len(length_AI) > 0:
             dist = np.abs(l1 - np.array(length_AI))
@@ -111,23 +120,19 @@ def compute_distances(length_vid, length_AI, AI_score, N_ai):
                 dist = dist[sorted_inds]
                 dist = dist[:N_ai]
 
-                score = AI_score[sorted_inds]
-                score = score[:N_ai]
             else:
                 dist_tmp = 50 * np.ones(N_ai)
                 dist_tmp[:len(dist)] = dist
 
-                score = np.zeros(N_ai)
-                score[:len(dist)] = AI_score
                 
                 dist = dist_tmp
         else:
             dist = 50 * np.ones(N_ai)
-            score = np.zeros(N_ai)
+
 
         distance_list.append(dist)
-        score_list.append(score)
-    return np.stack(distance_list), np.stack(score_list)
+
+    return distance_list
 
 
 def parse_gps_info(geoptis_data: Iterable):
@@ -300,11 +305,10 @@ def compute_smallest_distances(length_1, length_2):
 
 
 
-def compute_distances(length_vid, length_AI, AI_score, N_ai):
+def compute_distances(length_vid, length_AI, N_ai):
     # compute distances for each element of length_vid wrt length_AI (arrays or lists)
     # For each degradation in length_vid measure and return the N_ai smallest distances wrt to AI detections
     # returns array of distances (N_degradation_vid, N_ai), and array of AI scores (same dimensions)
-    assert len(length_AI) == len(AI_score)
     
     distance_list = []
     score_list = []
@@ -316,23 +320,16 @@ def compute_distances(length_vid, length_AI, AI_score, N_ai):
                 dist = dist[sorted_inds]
                 dist = dist[:N_ai]
 
-                score = AI_score[sorted_inds]
-                score = score[:N_ai]
             else:
                 dist_tmp = 50 * np.ones(N_ai)
                 dist_tmp[:len(dist)] = dist
-
-                score = np.zeros(N_ai)
-                score[:len(dist)] = AI_score
                 
                 dist = dist_tmp
         else:
             dist = 50 * np.ones(N_ai)
-            score = np.zeros(N_ai)
 
         distance_list.append(dist)
-        score_list.append(score)
-    return np.stack(distance_list), np.stack(score_list)
+    return distance_list
 
 
 
