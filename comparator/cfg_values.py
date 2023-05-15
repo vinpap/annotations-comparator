@@ -6,6 +6,9 @@ threshold_prediction = 0.44 # Score threshold beyond which a predicted
 # class is considered 'True'
 # THIS MIGHT NOT BE OPTIMAL, SHOULD IT BE CHANGED? + probably not necessary here
 
+process_every_nth_meter = 3
+# The time interval between two frames processed
+# THIS MIGHT NOT BE OPTIMAL, SHOULD IT BE CHANGED?
 
 # Loading classes for AI and videocoder annotations, as well as the classes
 # used for the comparison

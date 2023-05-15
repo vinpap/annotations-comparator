@@ -6,6 +6,7 @@ so we can use them to compute comparison metrics between different
 annotations.
 """
 from typing import Union
+from collections.abc import Iterable
 import numpy as np
 import unicodedata
 import csv
@@ -40,11 +41,18 @@ def convert_from_ai(annot: Union[str, dict]):
     """
     raise NotImplementedError("This package does not support AI-produced annotations yet")
 
-def convert_from_video(annot: Union[str, dict]):
+def convert_from_video(
+        annot: Union[str, dict],
+        geoptis: Iterable
+        ):
     """
     Converts videocoders annotations into a list we can reuse.
     """
-    video_annots = extract_lengths_videocoding()
+
+    if type(annot) == str:
+        annot = json.loads(annot)
+    video_annots = extract_lengths_videocoding(annot, geoptis)
+    return video_annots
 
 def strip_accents(s):
     # SEE: https://stackoverflow.com/questions/517923/what-is-the-best-way-to-remove-accents-normalize-in-a-python-unicode-string
@@ -75,29 +83,75 @@ def Haversine_distance(lnglats1, lnglats2):
         )
     )
 
-
-
-def parse_gps_info(csv_filepath):
-    """ Build a gps trajectory from a geoptis 4.3 or 4.5 csv. """
-    with open(csv_filepath, "r") as f:
-        reader = csv.reader(f, delimiter=";", quotechar="%")
-        first_row = next(reader)
-        if len(first_row) == 6:
-            return parse_gps_info_v4_3(reader, first_row)
-        elif len(first_row) == 10:
-            return parse_gps_info_v4_5(reader, first_row)
+def compute_smallest_distances(length_1, length_2):
+    # compute smallest distance for each element of length_1 wrt length_2 (arrays or lists)
+    distances = []        
+    for l1 in length_1:
+        if len(length_2) > 0:
+            dist = np.abs(l1 - np.array(length_2))
+            smallest_dist = np.min(dist)
         else:
-            print("Geoptis version not recognised")
+            smallest_dist = 50
+        distances.append(smallest_dist)
+    return np.array(distances)
+
+def compute_distances(length_vid, length_AI, AI_score, N_ai):
+    # compute distances for each element of length_vid wrt length_AI (arrays or lists)
+    # For each degradation in length_vid measure and return the N_ai smallest distances wrt to AI detections
+    # returns array of distances (N_degradation_vid, N_ai), and array of AI scores (same dimensions)
+    assert len(length_AI) == len(AI_score)
+    
+    distance_list = []
+    score_list = []
+    for l1 in length_vid:
+        if len(length_AI) > 0:
+            dist = np.abs(l1 - np.array(length_AI))
+            if len(length_AI) >= N_ai:
+                sorted_inds = np.argsort(dist) # sort by distance
+                dist = dist[sorted_inds]
+                dist = dist[:N_ai]
+
+                score = AI_score[sorted_inds]
+                score = score[:N_ai]
+            else:
+                dist_tmp = 50 * np.ones(N_ai)
+                dist_tmp[:len(dist)] = dist
+
+                score = np.zeros(N_ai)
+                score[:len(dist)] = AI_score
+                
+                dist = dist_tmp
+        else:
+            dist = 50 * np.ones(N_ai)
+            score = np.zeros(N_ai)
+
+        distance_list.append(dist)
+        score_list.append(score)
+    return np.stack(distance_list), np.stack(score_list)
 
 
-def parse_gps_info_v4_3(reader, first_row):
-    """ Build a gps trajectory from a geoptis 4.3 csv. """
+def parse_gps_info(geoptis_data: Iterable):
+    """ Build a gps trajectory from Geoptis 4.3 or 4.5 data """
+    
+    first_row = geoptis_data[0]
+    if len(first_row) == 6:
+        return parse_gps_info_v4_3(geoptis_data, first_row)
+    elif len(first_row) == 10:
+        return parse_gps_info_v4_5(geoptis_data, first_row)
+    else:
+        print("Geoptis version not recognised")
+
+
+def parse_gps_info_v4_3(
+        geoptis_data: Iterable, 
+        first_row: Iterable
+        ):
+    """ Build a gps trajectory from Geoptis 4.3 data """
     trajectory = []
     video_filename = first_row[4]
-    second_row = next(reader)
-    geoptis_version = second_row[1]
+    geoptis_version = geoptis_data[1][1]
     assert geoptis_version == "V 4.3"
-    for row in reader:
+    for row in geoptis_data[2:]:
         timestamp_epoch_ms = float(row[1])
         timestamp_video_ms = float(row[2])
         latitude = float(row[3])
@@ -106,12 +160,14 @@ def parse_gps_info_v4_3(reader, first_row):
         trajectory.append(current)
 
     trajectory = np.array(trajectory)
-
     return trajectory
 
 
-def parse_gps_info_v4_5(reader, first_row):
-    """ Build a gps trajectory from a csv with geoptis 4.5 format.
+def parse_gps_info_v4_5(
+        geoptis_data: Iterable, 
+        first_row: Iterable
+        ):
+    """ Build a gps trajectory from Geoptis 4.5 data.
     The original geoptis 4.5 csv needs to be split per video beforehand, 
     since the csv file used here is expected to correspond to a single video."""
     trajectory = []
@@ -128,7 +184,7 @@ def parse_gps_info_v4_5(reader, first_row):
     latitude = float(first_row[5])
     current = (timestamp_video_ms, longitude, latitude, timestamp_epoch_ms)
     trajectory.append(current)
-    for row in reader:
+    for row in geoptis_data[2:]:
         timestamp_epoch_ms = float(row[3])
         timestamp_video_ms = float(row[8])
         longitude = float(row[4])
@@ -137,20 +193,18 @@ def parse_gps_info_v4_5(reader, first_row):
         trajectory.append(current)
 
     trajectory = np.array(trajectory)
-
     return trajectory
 
 
 
-def parse_videocoding(jsonpath):
+def parse_videocoding(annots):
     """Parse videocoding jsons."""
 
     def date_to_timestamp(date):
         timestamp = datetime.datetime.strptime(date, "%d%m%Y_%H%M%S").timestamp()
         return timestamp
 
-    with open(jsonpath, "rt") as f_in:
-        content = json.load(f_in)
+    content = annots
 
     version = content["version"]
 
@@ -216,9 +270,9 @@ def parse_videocoding(jsonpath):
 
 
 
-def get_length_timestamp_map(geoptis_csvpath):
+def get_length_timestamp_map(geoptis):
     """Get relation between timestamp and length travelled."""
-    trajectory = parse_gps_info(geoptis_csvpath)
+    trajectory = parse_gps_info(geoptis)
     traj_times = trajectory[:, 3]
     traj_times *= 1e-3
     traj_lnglats = trajectory[:, 1:3]
@@ -284,13 +338,13 @@ def compute_distances(length_vid, length_AI, AI_score, N_ai):
 
 
 
-def extract_lengths_videocoding(jsonpath, geoptis_csvpath, classes_vid,
-                                classes_comp, process_every_nth_meter, return_max_distance=False):
+def extract_lengths_videocoding(annots, geoptis, return_max_distance=False):
     '''
     Return length of videocoded degradations from start of mission.
     '''
-    classes, degradations, timestamps = parse_videocoding(jsonpath)
+    classes, degradations, timestamps = parse_videocoding(annots)
 
+    
     miss_count = 0
     for cls in classes:
         if strip_accents(cls) not in classes_vid.keys():
@@ -304,7 +358,7 @@ def extract_lengths_videocoding(jsonpath, geoptis_csvpath, classes_vid,
         print('')
         sys.exit()
 
-    traj_times_0, distance_for_timestamp, max_distance = get_length_timestamp_map(geoptis_csvpath)
+    traj_times_0, distance_for_timestamp, max_distance = get_length_timestamp_map(geoptis)
     classname_to_deg_index = {name: i for i, name in enumerate(classes)}
     deg_index_to_classname = {i: name for name, i in classname_to_deg_index.items()}
 
@@ -358,6 +412,7 @@ def extract_lengths_videocoding(jsonpath, geoptis_csvpath, classes_vid,
 def extract_lengths_AI(videopath, geoptis_csvpath, classes_AI, classes_comp, ai_type, ai_config,
                       ai_checkpoint, process_every_nth_meter, device='cuda:0'):
     '''
+    TO BE CODED LATER
     Extract a frame of the video every n meter.
     Run inference on extracted images with pretrained model.
     Return length of detected degradations from start of mission.
